@@ -1,0 +1,8 @@
+name: Slack Task Poster
+type: module
+description: 'Posts notifications to Slack when a new Task is created.'
+core_version_requirement: ^10
+version: 1.0
+package: Custom
+dependencies:
+  - drupal:slack_connector

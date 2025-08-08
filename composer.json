@@ -1,0 +1,6 @@
+{
+    "name": "makehaven/slack_task_poster",
+    "type": "drupal-custom-module",
+    "description": "Posts notifications to Slack when a new Task is created.",
+    "license": "GPL-2.0-or-later"
+}

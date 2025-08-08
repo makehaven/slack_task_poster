@@ -1,0 +1,126 @@
+<?php
+
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Url;
+
+/**
+ * Implements hook_entity_insert().
+ *
+ * Fires when a new node is created.
+ */
+function slack_task_poster_entity_insert(EntityInterface $entity) {
+  // Check if the created entity is a node of type "task".
+  if ($entity->getEntityTypeId() === 'node' && $entity->bundle() === 'task') {
+    slack_task_poster_send_message($entity);
+  }
+}
+
+/**
+ * Sends a Slack notification for a Task node.
+ *
+ * @param \Drupal\node\NodeInterface $node
+ *   The Task node.
+ */
+function slack_task_poster_send_message($node) {
+  // Load Slack webhook URL from Slack Connector configuration.
+  $connector_config = \Drupal::config('slack_connector.settings');
+  $webhook_url = $connector_config->get('webhook_url');
+  if (empty($webhook_url)) {
+    \Drupal::logger('slack_task_poster')->error('Slack webhook URL is not configured in Slack Connector.');
+    return;
+  }
+
+  // Default channel.
+  $default_channel = '#tasks';
+
+  // Get task title.
+  $title = $node->label();
+
+  // Generate an absolute URL for the node.
+  $node_url = Url::fromRoute('entity.node.canonical', ['node' => $node->id()], ['absolute' => TRUE])->toString();
+
+  // Extract body text (if available).
+  $body_text = '';
+  if ($node->hasField('body') && !$node->get('body')->isEmpty()) {
+    $body_text = strip_tags($node->get('body')->value);
+  }
+
+  // Load the author.
+  $author = $node->getOwner();
+  $mention = '';
+  // Check for a Slack ID field (assumed to be on the user entity).
+  if ($author->hasField('field_member_slack_id_number') && !$author->get('field_member_slack_id_number')->isEmpty()) {
+    $slack_username = $author->get('field_member_slack_id_number')->value;
+    $mention = "@{$slack_username}: ";
+  }
+  // Otherwise, use first and last name if available.
+  elseif ($author->hasField('field_first_name') && $author->hasField('field_last_name') &&
+          !$author->get('field_first_name')->isEmpty() && !$author->get('field_last_name')->isEmpty()) {
+    $first_name = $author->get('field_first_name')->value;
+    $last_name = $author->get('field_last_name')->value;
+    $mention = " (by {$first_name} {$last_name})";
+  }
+
+  // Build an array of channels to post to.
+  $channels = [$default_channel];
+
+  // Check if the Task has a referenced "item" via field_task_equipment.
+  if ($node->hasField('field_task_equipment') && !$node->get('field_task_equipment')->isEmpty()) {
+    $item_node = $node->get('field_task_equipment')->entity;
+    if ($item_node) {
+      // If the referenced item has its own Slack channel.
+      if ($item_node->hasField('field_item_slack_channel') && !$item_node->get('field_item_slack_channel')->isEmpty()) {
+        $channel_name = $item_node->get('field_item_slack_channel')->value;
+        $channels[] = '#' . ltrim($channel_name, '#');
+      }
+      // Also check the item's taxonomy terms for Slack channels.
+      if ($item_node->hasField('field_item_area_interest') && !$item_node->get('field_item_area_interest')->isEmpty()) {
+        $terms = $item_node->get('field_item_area_interest')->referencedEntities();
+        foreach ($terms as $term) {
+          if ($term->hasField('field_interest_slack_channel') && !$term->get('field_interest_slack_channel')->isEmpty()) {
+            $channel_name = $term->get('field_interest_slack_channel')->value;
+            $channels[] = '#' . ltrim($channel_name, '#');
+          }
+        }
+      }
+    }
+  }
+
+  // Remove duplicate channels.
+  $channels = array_unique($channels);
+
+  // Build the message text.
+  $message_text = "📋 New Task: '{$title}' -- {$body_text} {$mention} \nView Task: {$node_url} in " . implode(' ', $channels);
+
+  // Prepare the payload and send the message to each channel.
+  $client = \Drupal::httpClient();
+  foreach ($channels as $channel) {
+    $data = [
+      'channel' => $channel,
+      'blocks' => [
+        [
+          'type' => 'section',
+          'text' => [
+            'type' => 'mrkdwn',
+            'text' => $message_text,
+          ],
+        ],
+      ],
+    ];
+
+    try {
+      $response = $client->post($webhook_url, [
+        'headers' => ['Content-Type' => 'application/json'],
+        'json' => $data,
+      ]);
+      \Drupal::logger('slack_task_poster')->notice('Slack response: @response', [
+        '@response' => $response->getBody()->getContents(),
+      ]);
+    }
+    catch (\Exception $e) {
+      \Drupal::logger('slack_task_poster')->error('Error posting to Slack: @error', [
+        '@error' => $e->getMessage(),
+      ]);
+    }
+  }
+}
