@@ -51,7 +51,7 @@ function slack_task_poster_send_message($node) {
   // Check for a Slack ID field (assumed to be on the user entity).
   if ($author->hasField('field_member_slack_id_number') && !$author->get('field_member_slack_id_number')->isEmpty()) {
     $slack_username = $author->get('field_member_slack_id_number')->value;
-    $mention = "@{$slack_username}: ";
+    $mention = "<@{$slack_username}>: ";
   }
   // Otherwise, use first and last name if available.
   elseif ($author->hasField('field_first_name') && $author->hasField('field_last_name') &&
