@@ -11,6 +11,9 @@ use Drupal\Core\Url;
 function slack_task_poster_entity_insert(EntityInterface $entity) {
   // Check if the created entity is a node of type "task".
   if ($entity->getEntityTypeId() === 'node' && $entity->bundle() === 'task') {
+    if (method_exists($entity, 'isPublished') && !$entity->isPublished()) {
+      return;
+    }
     slack_task_poster_send_message($entity);
   }
 }
